@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+        cache: 'npm'
+        cache-dependency-path: todoist-mcp/package-lock.json
+
+    - name: Install dependencies
+      run: cd todoist-mcp && npm ci
+
+    - name: Lint
+      run: cd todoist-mcp && npm run lint
+
+    - name: Build
+      run: cd todoist-mcp && npm run build
+
+    - name: Test
+      run: cd todoist-mcp && npm test -- --run

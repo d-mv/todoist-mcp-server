@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8881:8881"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
