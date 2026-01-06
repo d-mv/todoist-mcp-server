@@ -1,9 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import cors from "cors";
 import dotenv from "dotenv";
-import express from "express";
+import express, {
+	type NextFunction,
+	type Request,
+	type Response,
+} from "express";
 import { TodoistService } from "./services/todoist.js";
 import { registerTools } from "./tools/index.js";
 
@@ -28,58 +32,69 @@ const server = new McpServer({
 
 registerTools(server, todoistService);
 
-async function startServer() {
-	if (TRANSPORT === "stdio") {
-		console.error("Starting Todoist MCP Server in Stdio mode...");
-		const transport = new StdioServerTransport();
-		await server.connect(transport);
-	} else {
-		const app = express();
-		app.use(cors());
+async function main() {
+	try {
+		if (TRANSPORT === "stdio") {
+			console.error("Starting Todoist MCP Server in Stdio mode...");
 
-		// Auth middleware
-		app.use((req, res, next) => {
-			if (!MCP_API_KEY) {
-				return next();
-			}
+			const transport = new StdioServerTransport();
 
-			const authHeader = req.headers.authorization;
-			const apiKey = req.query.apiKey;
-
-			if (
-				(authHeader && authHeader === `Bearer ${MCP_API_KEY}`) ||
-				apiKey === MCP_API_KEY
-			) {
-				return next();
-			}
-
-			res.status(401).send("Unauthorized");
-		});
-
-		let transport: SSEServerTransport | null = null;
-
-		app.get("/sse", async (_req, res) => {
-			console.log("New SSE connection");
-			transport = new SSEServerTransport("/messages", res);
 			await server.connect(transport);
-		});
+		} else {
+			const app = express();
 
-		app.post("/messages", async (req, res) => {
-			// console.log('Received message');
-			if (transport) {
-				await transport.handlePostMessage(req, res);
-			} else {
-				res.status(400).send("No active SSE connection");
-			}
-		});
+			app.use(cors());
 
-		app.listen(PORT, () => {
-			console.log(`Todoist MCP Server running on port ${PORT}`);
-		});
+			app.use(express.json());
+
+			app.get("/healthcheck", (_req: Request, res: Response) => {
+				res.status(200).send("OK");
+			});
+
+			const authMiddleware = (
+				req: Request,
+
+				res: Response,
+
+				next: NextFunction,
+			) => {
+				if (!MCP_API_KEY) {
+					return next(); // No API key configured, auth is disabled
+				}
+
+				const authHeader = req.headers.authorization;
+
+				const apiKey = req.query.apiKey;
+
+				if (
+					(authHeader && authHeader === `Bearer ${MCP_API_KEY}`) ||
+					(apiKey && apiKey === MCP_API_KEY)
+				) {
+					return next();
+				}
+
+				res.status(401).send("Unauthorized");
+			};
+
+			const transport = new StreamableHTTPServerTransport();
+
+			await server.connect(transport);
+
+			app.all("/mcp", authMiddleware, async (req: Request, res: Response) => {
+				await transport.handleRequest(req, res, req.body);
+			});
+
+			app.listen(PORT, () => {
+				console.log(`Todoist MCP Server running on port ${PORT}`);
+
+				console.log("Server started successfully!");
+			});
+		}
+	} catch (err) {
+		console.error("Critical error in startServer:", err);
+
+		process.exit(1);
 	}
 }
 
-startServer().catch((err) => {
-	console.error("Failed to start server:", err);
-	process.exit(1);
-});
+main();
