@@ -10,6 +10,8 @@ import express, {
 } from "express";
 import { TodoistService } from "./services/todoist.js";
 import { registerTools } from "./tools/index.js";
+import fs from "node:fs";
+import path from "node:path";
 
 dotenv.config();
 
@@ -18,12 +20,26 @@ const MCP_API_KEY = process.env.MCP_API_KEY;
 const PORT = process.env.PORT || 8881;
 const TRANSPORT = process.env.TRANSPORT || "sse"; // Default to SSE if not specified
 
+let DEFAULT_PROJECT_ID = process.env.DEFAULT_PROJECT_ID;
+
+// Try to read project.id file if it exists and DEFAULT_PROJECT_ID is not set in env
+if (!DEFAULT_PROJECT_ID) {
+	try {
+		const projectIdPath = path.join(process.cwd(), "project.id");
+		if (fs.existsSync(projectIdPath)) {
+			DEFAULT_PROJECT_ID = fs.readFileSync(projectIdPath, "utf-8").trim();
+		}
+	} catch (err) {
+		console.error("Error reading project.id file:", err);
+	}
+}
+
 if (!API_TOKEN) {
 	console.error("TODOIST_API_TOKEN is required");
 	process.exit(1);
 }
 
-const todoistService = new TodoistService(API_TOKEN);
+const todoistService = new TodoistService(API_TOKEN, DEFAULT_PROJECT_ID);
 
 const server = new McpServer({
 	name: "todoist-mcp",

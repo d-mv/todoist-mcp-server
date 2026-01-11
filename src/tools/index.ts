@@ -15,15 +15,41 @@ export function registerTools(
 
 	server.tool(
 		"get_tasks",
-		"Get tasks from Todoist",
+		"Get tasks from Todoist with optional filtering and search. Defaults to the current project if none specified.",
 		{
 			projectId: z
 				.string()
 				.optional()
-				.describe("Optional project ID to filter tasks"),
+				.describe(
+					"Optional project ID to filter tasks. If not provided, uses the default project.",
+				),
+			sectionId: z
+				.string()
+				.optional()
+				.describe("Optional section ID to filter tasks"),
+			label: z
+				.string()
+				.optional()
+				.describe("Optional label name to filter tasks"),
+			priority: z
+				.number()
+				.optional()
+				.describe("Optional priority (1-4) to filter tasks"),
+			search: z
+				.string()
+				.optional()
+				.describe(
+					"Optional search query to filter tasks by content or description",
+				),
 		},
-		async ({ projectId }) => {
-			const tasks = await todoistService.getTasks(projectId);
+		async ({ projectId, sectionId, label, priority, search }) => {
+			const tasks = await todoistService.getTasks({
+				projectId,
+				sectionId,
+				label,
+				priority,
+				search,
+			});
 			return {
 				content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
 			};
@@ -32,10 +58,15 @@ export function registerTools(
 
 	server.tool(
 		"add_task",
-		"Add a new task to Todoist",
+		"Add a new task to Todoist. Defaults to the current project if none specified.",
 		{
 			content: z.string().describe("Task content"),
-			projectId: z.string().optional().describe("Optional project ID"),
+			projectId: z
+				.string()
+				.optional()
+				.describe(
+					"Optional project ID. If not provided, uses the default project.",
+				),
 			dueDate: z
 				.string()
 				.optional()
@@ -91,17 +122,12 @@ export function registerTools(
 		},
 	);
 
-	server.tool(
-		"get_labels",
-		"Get all Todoist labels",
-		{},
-		async () => {
-			const labels = await todoistService.getLabels();
-			return {
-				content: [{ type: "text", text: JSON.stringify(labels, null, 2) }],
-			};
-		},
-	);
+	server.tool("get_labels", "Get all Todoist labels", {}, async () => {
+		const labels = await todoistService.getLabels();
+		return {
+			content: [{ type: "text", text: JSON.stringify(labels, null, 2) }],
+		};
+	});
 
 	server.tool(
 		"create_label",
@@ -109,11 +135,22 @@ export function registerTools(
 		{
 			name: z.string().describe("Name of the label"),
 			order: z.number().optional().describe("Order of the label"),
-			color: z.string().optional().describe("Color of the label (e.g., 'berry_red')"),
-			isFavorite: z.boolean().optional().describe("Whether the label is a favorite"),
+			color: z
+				.string()
+				.optional()
+				.describe("Color of the label (e.g., 'berry_red')"),
+			isFavorite: z
+				.boolean()
+				.optional()
+				.describe("Whether the label is a favorite"),
 		},
 		async ({ name, order, color, isFavorite }) => {
-			const label = await todoistService.createLabel(name, order, color, isFavorite);
+			const label = await todoistService.createLabel(
+				name,
+				order,
+				color,
+				isFavorite,
+			);
 			return {
 				content: [{ type: "text", text: JSON.stringify(label, null, 2) }],
 			};
@@ -128,7 +165,10 @@ export function registerTools(
 			name: z.string().optional().describe("New name of the label"),
 			order: z.number().optional().describe("New order of the label"),
 			color: z.string().optional().describe("New color of the label"),
-			isFavorite: z.boolean().optional().describe("Whether the label is a favorite"),
+			isFavorite: z
+				.boolean()
+				.optional()
+				.describe("Whether the label is a favorite"),
 		},
 		async ({ labelId, name, order, color, isFavorite }) => {
 			const label = await todoistService.updateLabel(labelId, {
@@ -180,16 +220,23 @@ export function registerTools(
 		"Move a task to a different project, section, or parent task",
 		{
 			taskId: z.string().describe("The ID of the task to move"),
-			projectId: z.string().optional().describe("ID of the destination project"),
-			sectionId: z.string().optional().describe("ID of the destination section"),
-			parentId: z.string().optional().describe("ID of the destination parent task"),
+			projectId: z
+				.string()
+				.optional()
+				.describe("ID of the destination project"),
+			sectionId: z
+				.string()
+				.optional()
+				.describe("ID of the destination section"),
+			parentId: z
+				.string()
+				.optional()
+				.describe("ID of the destination parent task"),
 		},
 		async ({ taskId, projectId, sectionId, parentId }) => {
 			await todoistService.moveTask(taskId, { projectId, sectionId, parentId });
 			return {
-				content: [
-					{ type: "text", text: `Task ${taskId} moved successfully.` },
-				],
+				content: [{ type: "text", text: `Task ${taskId} moved successfully.` }],
 			};
 		},
 	);
@@ -254,7 +301,7 @@ export function registerTools(
 				.describe("Confirm deletion if project is not empty"),
 		},
 		async ({ projectId, confirm }) => {
-			const tasks = await todoistService.getTasks(projectId);
+			const tasks = await todoistService.getTasks({ projectId });
 			if (tasks.length > 0 && !confirm) {
 				return {
 					isError: true,
@@ -278,10 +325,15 @@ export function registerTools(
 
 	server.tool(
 		"get_comments",
-		"Get comments for a task or project",
+		"Get comments for a task or project. Defaults to the current project if no IDs provided.",
 		{
 			taskId: z.string().optional().describe("The ID of the task"),
-			projectId: z.string().optional().describe("The ID of the project"),
+			projectId: z
+				.string()
+				.optional()
+				.describe(
+					"The ID of the project. If not provided (and no taskId), uses the default project.",
+				),
 		},
 		async ({ taskId, projectId }) => {
 			const comments = await todoistService.getComments(taskId, projectId);
@@ -293,11 +345,16 @@ export function registerTools(
 
 	server.tool(
 		"add_comment",
-		"Add a comment to a task or project",
+		"Add a comment to a task or project. Defaults to the current project if no IDs provided.",
 		{
 			content: z.string().describe("The content of the comment"),
 			taskId: z.string().optional().describe("The ID of the task"),
-			projectId: z.string().optional().describe("The ID of the project"),
+			projectId: z
+				.string()
+				.optional()
+				.describe(
+					"The ID of the project. If not provided (and no taskId), uses the default project.",
+				),
 		},
 		async ({ content, taskId, projectId }) => {
 			if (!taskId && !projectId) {

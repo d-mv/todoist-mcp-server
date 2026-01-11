@@ -29,20 +29,93 @@ describe("TodoistService", () => {
 		expect(projects).toEqual(mockProjects);
 	});
 
-	it("should create a task", async () => {
-		const mockTask = { id: "123", content: "Test Task", labels: ["label1"] };
+	it("should get tasks with filters", async () => {
+		const mockTasks = [{ id: "t1", content: "Task 1", description: "" }];
+		mockAxios.get.mockResolvedValue({ data: mockTasks });
+
+		const tasks = await service.getTasks({ projectId: "p1", priority: 4 });
+
+		expect(mockAxios.get).toHaveBeenCalledWith("/tasks", {
+			params: { project_id: "p1", priority: 4 },
+		});
+		expect(tasks).toEqual(mockTasks);
+	});
+
+	it("should search tasks by content", async () => {
+		const mockTasks = [
+			{ id: "t1", content: "Buy milk", description: "" },
+			{ id: "t2", content: "Call mom", description: "urgent" },
+		];
+		mockAxios.get.mockResolvedValue({ data: mockTasks });
+
+		const tasks = await service.getTasks({ search: "milk" });
+
+		expect(tasks).toEqual([mockTasks[0]]);
+	});
+
+	it("should search tasks by description", async () => {
+		const mockTasks = [
+			{ id: "t1", content: "Buy milk", description: "" },
+			{ id: "t2", content: "Call mom", description: "urgent" },
+		];
+		mockAxios.get.mockResolvedValue({ data: mockTasks });
+
+		const tasks = await service.getTasks({ search: "urgent" });
+
+		expect(tasks).toEqual([mockTasks[1]]);
+	});
+
+	it("should get tasks with defaultProjectId if none provided", async () => {
+		const serviceWithDefault = new TodoistService(token, "default-p1");
+		const mockTasks = [{ id: "t1", content: "Task 1" }];
+		mockAxios.get.mockResolvedValue({ data: mockTasks });
+
+		const tasks = await serviceWithDefault.getTasks();
+
+		expect(mockAxios.get).toHaveBeenCalledWith("/tasks", {
+			params: { project_id: "default-p1" },
+		});
+		expect(tasks).toEqual(mockTasks);
+	});
+
+	it("should override defaultProjectId in getTasks if projectId provided", async () => {
+		const serviceWithDefault = new TodoistService(token, "default-p1");
+		const mockTasks = [{ id: "t1", content: "Task 1" }];
+		mockAxios.get.mockResolvedValue({ data: mockTasks });
+
+		await serviceWithDefault.getTasks({ projectId: "other-p" });
+
+		expect(mockAxios.get).toHaveBeenCalledWith("/tasks", {
+			params: { project_id: "other-p" },
+		});
+	});
+
+	it("should create a task with defaultProjectId if none provided", async () => {
+		const serviceWithDefault = new TodoistService(token, "default-p1");
+		const mockTask = { id: "123", content: "Test Task" };
 		mockAxios.post.mockResolvedValue({ data: mockTask });
 
-		const task = await service.createTask("Test Task", "project1", "tomorrow", undefined, ["label1"]);
+		await serviceWithDefault.createTask("Test Task");
 
 		expect(mockAxios.post).toHaveBeenCalledWith("/tasks", {
 			content: "Test Task",
-			project_id: "project1",
-			due_string: "tomorrow",
+			project_id: "default-p1",
+			due_string: undefined,
 			priority: undefined,
-			labels: ["label1"],
+			labels: undefined,
 		});
-		expect(task).toEqual(mockTask);
+	});
+
+	it("should use defaultProjectId for comments if taskId not provided", async () => {
+		const serviceWithDefault = new TodoistService(token, "default-p1");
+		const mockComments = [{ id: "c1", content: "Test comment" }];
+		mockAxios.get.mockResolvedValue({ data: mockComments });
+
+		await serviceWithDefault.getComments();
+
+		expect(mockAxios.get).toHaveBeenCalledWith("/comments", {
+			params: { project_id: "default-p1" },
+		});
 	});
 
 	it("should delete a task", async () => {

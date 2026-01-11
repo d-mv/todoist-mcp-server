@@ -45,8 +45,9 @@ export interface TodoistComment {
 
 export class TodoistService {
 	private client: AxiosInstance;
+	private defaultProjectId?: string;
 
-	constructor(token: string) {
+	constructor(token: string, defaultProjectId?: string) {
 		this.client = axios.create({
 			baseURL: "https://api.todoist.com/rest/v2",
 			headers: {
@@ -54,6 +55,7 @@ export class TodoistService {
 				"Content-Type": "application/json",
 			},
 		});
+		this.defaultProjectId = defaultProjectId;
 	}
 
 	async getProjects(): Promise<TodoistProject[]> {
@@ -61,10 +63,38 @@ export class TodoistService {
 		return response.data;
 	}
 
-	async getTasks(projectId?: string): Promise<TodoistTask[]> {
-		const params = projectId ? { project_id: projectId } : {};
+	async getTasks(
+		options: {
+			projectId?: string;
+			sectionId?: string;
+			label?: string;
+			priority?: number;
+			lang?: string;
+			search?: string;
+		} = {},
+	): Promise<TodoistTask[]> {
+		const params: any = {};
+		const projectId = options.projectId || this.defaultProjectId;
+
+		if (projectId) params.project_id = projectId;
+		if (options.sectionId) params.section_id = options.sectionId;
+		if (options.label) params.label = options.label;
+		if (options.priority) params.priority = options.priority;
+		if (options.lang) params.lang = options.lang;
+
 		const response = await this.client.get<TodoistTask[]>("/tasks", { params });
-		return response.data;
+		let tasks = response.data;
+
+		if (options.search) {
+			const query = options.search.toLowerCase();
+			tasks = tasks.filter(
+				(task) =>
+					task.content.toLowerCase().includes(query) ||
+					task.description.toLowerCase().includes(query),
+			);
+		}
+
+		return tasks;
 	}
 
 	async createTask(
@@ -76,7 +106,7 @@ export class TodoistService {
 	): Promise<TodoistTask> {
 		const response = await this.client.post<TodoistTask>("/tasks", {
 			content,
-			project_id: projectId,
+			project_id: projectId || this.defaultProjectId,
 			due_string: dueDate,
 			priority,
 			labels,
@@ -132,23 +162,39 @@ export class TodoistService {
 		return response.data;
 	}
 
-	async createLabel(name: string, order?: number, color?: string, isFavorite?: boolean): Promise<TodoistLabel> {
+	async createLabel(
+		name: string,
+		order?: number,
+		color?: string,
+		isFavorite?: boolean,
+	): Promise<TodoistLabel> {
 		const response = await this.client.post<TodoistLabel>("/labels", {
 			name,
 			order,
 			color,
-			is_favorite: isFavorite
+			is_favorite: isFavorite,
 		});
 		return response.data;
 	}
 
-	async updateLabel(labelId: string, options: { name?: string, order?: number, color?: string, isFavorite?: boolean }): Promise<TodoistLabel> {
-		const response = await this.client.post<TodoistLabel>(`/labels/${labelId}`, {
-			name: options.name,
-			order: options.order,
-			color: options.color,
-			is_favorite: options.isFavorite
-		});
+	async updateLabel(
+		labelId: string,
+		options: {
+			name?: string;
+			order?: number;
+			color?: string;
+			isFavorite?: boolean;
+		},
+	): Promise<TodoistLabel> {
+		const response = await this.client.post<TodoistLabel>(
+			`/labels/${labelId}`,
+			{
+				name: options.name,
+				order: options.order,
+				color: options.color,
+				is_favorite: options.isFavorite,
+			},
+		);
 		return response.data;
 	}
 
@@ -189,8 +235,11 @@ export class TodoistService {
 		projectId?: string,
 	): Promise<TodoistComment[]> {
 		const params: any = {};
-		if (taskId) params.task_id = taskId;
-		if (projectId) params.project_id = projectId;
+		if (taskId) {
+			params.task_id = taskId;
+		} else {
+			params.project_id = projectId || this.defaultProjectId;
+		}
 		const response = await this.client.get<TodoistComment[]>("/comments", {
 			params,
 		});
@@ -203,8 +252,11 @@ export class TodoistService {
 		projectId?: string,
 	): Promise<TodoistComment> {
 		const data: any = { content };
-		if (taskId) data.task_id = taskId;
-		if (projectId) data.project_id = projectId;
+		if (taskId) {
+			data.task_id = taskId;
+		} else {
+			data.project_id = projectId || this.defaultProjectId;
+		}
 
 		const response = await this.client.post<TodoistComment>("/comments", data);
 		return response.data;
