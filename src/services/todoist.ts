@@ -43,13 +43,24 @@ export interface TodoistComment {
 	};
 }
 
+interface TodoistListResponse<T> {
+	results: T[];
+}
+
+interface TodoistIdMapping {
+	old_id: string;
+	new_id: string;
+}
+
 export class TodoistService {
 	private client: AxiosInstance;
 	private defaultProjectId?: string;
+	private projectIdMappingCache = new Map<string, string>();
+	private taskIdMappingCache = new Map<string, string>();
 
 	constructor(token: string, defaultProjectId?: string) {
 		this.client = axios.create({
-			baseURL: "https://api.todoist.com/rest/v2",
+			baseURL: "https://api.todoist.com/api/v1",
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
@@ -58,9 +69,51 @@ export class TodoistService {
 		this.defaultProjectId = defaultProjectId;
 	}
 
+	private unwrapListResponse<T>(data: T[] | TodoistListResponse<T>): T[] {
+		return Array.isArray(data) ? data : data.results;
+	}
+
+	private async resolveProjectId(projectId?: string): Promise<string | undefined> {
+		if (!projectId || !/^\d+$/.test(projectId)) {
+			return projectId;
+		}
+
+		const cached = this.projectIdMappingCache.get(projectId);
+		if (cached) {
+			return cached;
+		}
+
+		const response = await this.client.get<TodoistIdMapping[]>(
+			`/id_mappings/projects/${projectId}`,
+		);
+		const mappedId = response.data[0]?.new_id || projectId;
+		this.projectIdMappingCache.set(projectId, mappedId);
+		return mappedId;
+	}
+
+	private async resolveTaskId(taskId?: string): Promise<string | undefined> {
+		if (!taskId || !/^\d+$/.test(taskId)) {
+			return taskId;
+		}
+
+		const cached = this.taskIdMappingCache.get(taskId);
+		if (cached) {
+			return cached;
+		}
+
+		const response = await this.client.get<TodoistIdMapping[]>(
+			`/id_mappings/tasks/${taskId}`,
+		);
+		const mappedId = response.data[0]?.new_id || taskId;
+		this.taskIdMappingCache.set(taskId, mappedId);
+		return mappedId;
+	}
+
 	async getProjects(): Promise<TodoistProject[]> {
-		const response = await this.client.get<TodoistProject[]>("/projects");
-		return response.data;
+		const response = await this.client.get<
+			TodoistProject[] | TodoistListResponse<TodoistProject>
+		>("/projects");
+		return this.unwrapListResponse(response.data);
 	}
 
 	async getTasks(
@@ -74,7 +127,9 @@ export class TodoistService {
 		} = {},
 	): Promise<TodoistTask[]> {
 		const params: any = {};
-		const projectId = options.projectId || this.defaultProjectId;
+		const projectId = await this.resolveProjectId(
+			options.projectId || this.defaultProjectId,
+		);
 
 		if (projectId) params.project_id = projectId;
 		if (options.sectionId) params.section_id = options.sectionId;
@@ -82,8 +137,10 @@ export class TodoistService {
 		if (options.priority) params.priority = options.priority;
 		if (options.lang) params.lang = options.lang;
 
-		const response = await this.client.get<TodoistTask[]>("/tasks", { params });
-		let tasks = response.data;
+		const response = await this.client.get<
+			TodoistTask[] | TodoistListResponse<TodoistTask>
+		>("/tasks", { params });
+		let tasks = this.unwrapListResponse(response.data);
 
 		if (options.search) {
 			const query = options.search.toLowerCase();
@@ -104,9 +161,12 @@ export class TodoistService {
 		priority?: number,
 		labels?: string[],
 	): Promise<TodoistTask> {
+		const resolvedProjectId = await this.resolveProjectId(
+			projectId || this.defaultProjectId,
+		);
 		const response = await this.client.post<TodoistTask>("/tasks", {
 			content,
-			project_id: projectId || this.defaultProjectId,
+			project_id: resolvedProjectId,
 			due_string: dueDate,
 			priority,
 			labels,
@@ -124,18 +184,23 @@ export class TodoistService {
 			labels?: string[];
 		},
 	): Promise<TodoistTask> {
-		const response = await this.client.post<TodoistTask>(`/tasks/${taskId}`, {
+		const resolvedTaskId = await this.resolveTaskId(taskId);
+		const response = await this.client.post<TodoistTask>(
+			`/tasks/${resolvedTaskId}`,
+			{
 			content: options.content,
 			description: options.description,
 			due_string: options.dueDate,
 			priority: options.priority,
 			labels: options.labels,
-		});
+			},
+		);
 		return response.data;
 	}
 
 	async closeTask(taskId: string): Promise<void> {
-		await this.client.post(`/tasks/${taskId}/close`);
+		const resolvedTaskId = await this.resolveTaskId(taskId);
+		await this.client.post(`/tasks/${resolvedTaskId}/close`);
 	}
 
 	async moveTask(
@@ -146,20 +211,25 @@ export class TodoistService {
 			parentId?: string;
 		},
 	): Promise<void> {
-		await this.client.post(`/tasks/${taskId}/move`, {
-			project_id: options.projectId,
+		const resolvedTaskId = await this.resolveTaskId(taskId);
+		const resolvedProjectId = await this.resolveProjectId(options.projectId);
+		await this.client.post(`/tasks/${resolvedTaskId}/move`, {
+			project_id: resolvedProjectId,
 			section_id: options.sectionId,
 			parent_id: options.parentId,
 		});
 	}
 
 	async deleteTask(taskId: string): Promise<void> {
-		await this.client.delete(`/tasks/${taskId}`);
+		const resolvedTaskId = await this.resolveTaskId(taskId);
+		await this.client.delete(`/tasks/${resolvedTaskId}`);
 	}
 
 	async getLabels(): Promise<TodoistLabel[]> {
-		const response = await this.client.get<TodoistLabel[]>("/labels");
-		return response.data;
+		const response = await this.client.get<
+			TodoistLabel[] | TodoistListResponse<TodoistLabel>
+		>("/labels");
+		return this.unwrapListResponse(response.data);
 	}
 
 	async createLabel(
@@ -206,9 +276,10 @@ export class TodoistService {
 		name: string,
 		parentId?: string,
 	): Promise<TodoistProject> {
+		const resolvedParentId = await this.resolveProjectId(parentId);
 		const response = await this.client.post<TodoistProject>("/projects", {
 			name,
-			parent_id: parentId,
+			parent_id: resolvedParentId,
 		});
 		return response.data;
 	}
@@ -217,8 +288,9 @@ export class TodoistService {
 		projectId: string,
 		name: string,
 	): Promise<TodoistProject> {
+		const resolvedProjectId = await this.resolveProjectId(projectId);
 		const response = await this.client.post<TodoistProject>(
-			`/projects/${projectId}`,
+			`/projects/${resolvedProjectId}`,
 			{
 				name,
 			},
@@ -227,7 +299,8 @@ export class TodoistService {
 	}
 
 	async deleteProject(projectId: string): Promise<void> {
-		await this.client.delete(`/projects/${projectId}`);
+		const resolvedProjectId = await this.resolveProjectId(projectId);
+		await this.client.delete(`/projects/${resolvedProjectId}`);
 	}
 
 	async getComments(
@@ -236,14 +309,18 @@ export class TodoistService {
 	): Promise<TodoistComment[]> {
 		const params: any = {};
 		if (taskId) {
-			params.task_id = taskId;
+			params.task_id = await this.resolveTaskId(taskId);
 		} else {
-			params.project_id = projectId || this.defaultProjectId;
+			params.project_id = await this.resolveProjectId(
+				projectId || this.defaultProjectId,
+			);
 		}
-		const response = await this.client.get<TodoistComment[]>("/comments", {
+		const response = await this.client.get<
+			TodoistComment[] | TodoistListResponse<TodoistComment>
+		>("/comments", {
 			params,
 		});
-		return response.data;
+		return this.unwrapListResponse(response.data);
 	}
 
 	async addComment(
@@ -253,9 +330,11 @@ export class TodoistService {
 	): Promise<TodoistComment> {
 		const data: any = { content };
 		if (taskId) {
-			data.task_id = taskId;
+			data.task_id = await this.resolveTaskId(taskId);
 		} else {
-			data.project_id = projectId || this.defaultProjectId;
+			data.project_id = await this.resolveProjectId(
+				projectId || this.defaultProjectId,
+			);
 		}
 
 		const response = await this.client.post<TodoistComment>("/comments", data);

@@ -19,6 +19,14 @@ describe("TodoistService", () => {
 		service = new TodoistService(token);
 	});
 
+	it("should configure axios with Todoist api/v1 base URL", () => {
+		expect(axios.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				baseURL: "https://api.todoist.com/api/v1",
+			}),
+		);
+	});
+
 	it("should get projects", async () => {
 		const mockProjects = [{ id: "1", name: "Inbox" }];
 		mockAxios.get.mockResolvedValue({ data: mockProjects });
@@ -31,7 +39,7 @@ describe("TodoistService", () => {
 
 	it("should get tasks with filters", async () => {
 		const mockTasks = [{ id: "t1", content: "Task 1", description: "" }];
-		mockAxios.get.mockResolvedValue({ data: mockTasks });
+		mockAxios.get.mockResolvedValue({ data: { results: mockTasks } });
 
 		const tasks = await service.getTasks({ projectId: "p1", priority: 4 });
 
@@ -46,7 +54,7 @@ describe("TodoistService", () => {
 			{ id: "t1", content: "Buy milk", description: "" },
 			{ id: "t2", content: "Call mom", description: "urgent" },
 		];
-		mockAxios.get.mockResolvedValue({ data: mockTasks });
+		mockAxios.get.mockResolvedValue({ data: { results: mockTasks } });
 
 		const tasks = await service.getTasks({ search: "milk" });
 
@@ -58,7 +66,7 @@ describe("TodoistService", () => {
 			{ id: "t1", content: "Buy milk", description: "" },
 			{ id: "t2", content: "Call mom", description: "urgent" },
 		];
-		mockAxios.get.mockResolvedValue({ data: mockTasks });
+		mockAxios.get.mockResolvedValue({ data: { results: mockTasks } });
 
 		const tasks = await service.getTasks({ search: "urgent" });
 
@@ -68,7 +76,7 @@ describe("TodoistService", () => {
 	it("should get tasks with defaultProjectId if none provided", async () => {
 		const serviceWithDefault = new TodoistService(token, "default-p1");
 		const mockTasks = [{ id: "t1", content: "Task 1" }];
-		mockAxios.get.mockResolvedValue({ data: mockTasks });
+		mockAxios.get.mockResolvedValue({ data: { results: mockTasks } });
 
 		const tasks = await serviceWithDefault.getTasks();
 
@@ -136,7 +144,7 @@ describe("TodoistService", () => {
 
 	it("should get labels", async () => {
 		const mockLabels = [{ id: "l1", name: "label1" }];
-		mockAxios.get.mockResolvedValue({ data: mockLabels });
+		mockAxios.get.mockResolvedValue({ data: { results: mockLabels } });
 
 		const labels = await service.getLabels();
 
@@ -200,7 +208,7 @@ describe("TodoistService", () => {
 
 	it("should get comments", async () => {
 		const mockComments = [{ id: "c1", content: "Test comment" }];
-		mockAxios.get.mockResolvedValue({ data: mockComments });
+		mockAxios.get.mockResolvedValue({ data: { results: mockComments } });
 
 		const comments = await service.getComments("task1");
 
@@ -227,5 +235,44 @@ describe("TodoistService", () => {
 		mockAxios.delete.mockResolvedValue({});
 		await service.deleteComment("c1");
 		expect(mockAxios.delete).toHaveBeenCalledWith("/comments/c1");
+	});
+
+	it("should map legacy numeric project IDs before querying tasks", async () => {
+		const serviceWithDefault = new TodoistService(token, "2365250615");
+		const mockTasks = [{ id: "t1", content: "Task 1", description: "" }];
+		mockAxios.get
+			.mockResolvedValueOnce({
+				data: [{ old_id: "2365250615", new_id: "6fhpgx7PHQ6M8ppr" }],
+			})
+			.mockResolvedValueOnce({ data: { results: mockTasks } });
+
+		await serviceWithDefault.getTasks();
+
+		expect(mockAxios.get).toHaveBeenNthCalledWith(
+			1,
+			"/id_mappings/projects/2365250615",
+		);
+		expect(mockAxios.get).toHaveBeenNthCalledWith(2, "/tasks", {
+			params: { project_id: "6fhpgx7PHQ6M8ppr" },
+		});
+	});
+
+	it("should map legacy numeric task ID before updating a task", async () => {
+		const mockTask = { id: "6fvVQR9q7v4PjhpJ", content: "Updated Task" };
+		mockAxios.get.mockResolvedValueOnce({
+			data: [{ old_id: "1234567890", new_id: "6fvVQR9q7v4PjhpJ" }],
+		});
+		mockAxios.post.mockResolvedValueOnce({ data: mockTask });
+
+		await service.updateTask("1234567890", { content: "Updated Task" });
+
+		expect(mockAxios.get).toHaveBeenCalledWith("/id_mappings/tasks/1234567890");
+		expect(mockAxios.post).toHaveBeenCalledWith("/tasks/6fvVQR9q7v4PjhpJ", {
+			content: "Updated Task",
+			description: undefined,
+			due_string: undefined,
+			priority: undefined,
+			labels: undefined,
+		});
 	});
 });
